@@ -57,4 +57,4 @@ Never upload the `.streamlit` folder to GitHub.
 - **"API key not found"**: the secret must be named exactly `GEMINI_API_KEY`.
 - **"Too many requests"**: the free tier has limits. Wait a minute and retry.
 - **Quiz fails to build**: click Generate again. AI answers vary.
-- **Model error**: change `MODEL = "gemini-2.5-flash"` near the top of `app.py` to a current Gemini model name.
+- **"Could not reach Gemini" or model errors**: the app tries several Gemini model names automatically and shows the exact error under the message. To force a model, add `GEMINI_MODEL = "model-name"` to your Secrets (model names are listed at https://ai.google.dev/gemini-api/docs/models).
