@@ -8,7 +8,9 @@ from google.genai import types
 
 st.set_page_config(page_title="LearnMate AI", page_icon="🎓", layout="wide")
 
-MODEL = "gemini-2.5-flash"
+# Gemini model names change often. The app tries these in order until one works.
+# You can force one by adding GEMINI_MODEL = "model-name" to your Streamlit secrets.
+MODEL_CANDIDATES = ["gemini-flash-latest", "gemini-3-flash-preview", "gemini-2.5-flash"]
 SUBJECTS = [
     "Mathematics", "Physics", "Chemistry", "Biology", "Computer Science",
     "History", "Geography", "Economics", "Literature", "Languages",
@@ -75,25 +77,51 @@ def system_prompt(subject, topic, level):
             "Be accurate and encouraging. Use Markdown. If unsure, say so instead of guessing.")
 
 
-def ask_gemini(contents, system, as_json=False):
-    """Send a prompt to Gemini. Returns text, or None after showing a friendly error."""
+def model_list():
     try:
-        config = types.GenerateContentConfig(
-            system_instruction=system,
-            response_mime_type="application/json" if as_json else "text/plain",
-        )
-        response = client.models.generate_content(model=MODEL, contents=contents, config=config)
+        forced = st.secrets["GEMINI_MODEL"]
+    except Exception:
+        forced = None
+    models = ([forced] if forced else []) + MODEL_CANDIDATES
+    # Try the model that worked last time first
+    working = st.session_state.get("working_model")
+    return ([working] if working else []) + [m for m in models if m != working]
+
+
+def ask_gemini(contents, system, as_json=False):
+    """Send a prompt to Gemini. Returns text, or None after showing a clear error."""
+    config = types.GenerateContentConfig(
+        system_instruction=system,
+        response_mime_type="application/json" if as_json else "text/plain",
+    )
+    last_error = None
+    for model in model_list():
+        try:
+            response = client.models.generate_content(model=model, contents=contents, config=config)
+        except Exception as e:
+            last_error = e
+            msg = str(e).lower()
+            if "404" in msg or "not found" in msg or "no longer available" in msg or "not supported" in msg:
+                continue  # this model name is not available: try the next one
+            break  # key, quota or network problem: another model will not help
         if response.text:
+            st.session_state.working_model = model
             return response.text
         st.error("Gemini returned an empty answer. Please try again.")
-    except Exception as e:
-        msg = str(e).lower()
-        if "api key" in msg or "403" in msg or "401" in msg:
-            st.error("The Gemini API key looks invalid. Check your secrets.")
-        elif "429" in msg or "quota" in msg:
-            st.error("Too many requests right now. Wait a minute and try again.")
-        else:
-            st.error("Could not reach Gemini. Please try again.")
+        return None
+
+    msg = str(last_error).lower()
+    if "api key" in msg or "api_key_invalid" in msg or "401" in msg or "403" in msg or "permission" in msg:
+        st.error("Gemini rejected the API key. Check that GEMINI_API_KEY in your Secrets is correct "
+                 "and has no extra spaces or quotes.")
+    elif "429" in msg or "quota" in msg or "resource_exhausted" in msg:
+        st.error("Gemini says you are out of free requests for now. Wait a minute and try again.")
+    elif "404" in msg or "not found" in msg:
+        st.error("None of the Gemini models in the list are available. "
+                 "Set GEMINI_MODEL in your Secrets to a current model name.")
+    else:
+        st.error("Could not reach Gemini. Details below.")
+    st.code(f"{type(last_error).__name__}: {last_error}")
     return None
 
 
